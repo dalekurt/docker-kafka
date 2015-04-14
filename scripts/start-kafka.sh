@@ -1,37 +1,46 @@
-#!/bin/sh
+#!/bin/bash
 
-# Optional ENV variables:
-# * ADVERTISED_HOST: the external ip for the container, e.g. `boot2docker ip`
-# * ADVERTISED_PORT: the external port for Kafka, e.g. 9092
-# * ZK_CHROOT: the zookeeper chroot that's used by Kafka (without / prefix), e.g. "kafka"
-# * LOG_RETENTION_HOURS: the minimum age of a log file in hours to be eligible for deletion (default is 168, for 1 week)
-# * LOG_RETENTION_BYTES: configure the size at which segments are pruned from the log, (default is 1073741824, for 1GB)
-
-# Configure advertised host/port if we run in helios
-if [ ! -z "$HELIOS_PORT_kafka" ]; then
-    ADVERTISED_HOST=`echo $HELIOS_PORT_kafka | cut -d':' -f 1 | xargs -n 1 dig +short | tail -n 1`
-    ADVERTISED_PORT=`echo $HELIOS_PORT_kafka | cut -d':' -f 2`
+if [[ -z "$KAFKA_ADVERTISED_PORT" ]]; then
+    export KAFKA_ADVERTISED_PORT=$(docker port `hostname` 9092 | sed -r "s/.*:(.*)/\1/g")
+fi
+if [[ -z "$KAFKA_BROKER_ID" ]]; then
+    export KAFKA_BROKER_ID=$(docker inspect `hostname` | jq --raw-output '.[0] | .Name' | awk -F_ '{print $3}')
+fi
+if [[ -z "$KAFKA_LOG_DIRS" ]]; then
+    export KAFKA_LOG_DIRS="/kafka/kafka-logs-$KAFKA_BROKER_ID"
+fi
+if [[ -z "$KAFKA_ZOOKEEPER_CONNECT" ]]; then
+    export KAFKA_ZOOKEEPER_CONNECT=$(env | grep ZK.*PORT_2181_TCP= | sed -e 's|.*tcp://||' | paste -sd ,)
 fi
 
-# Set the external host and port
-if [ ! -z "$ADVERTISED_HOST" ]; then
-    echo "advertised host: $ADVERTISED_HOST"
-    sed -r -i "s/#(advertised.host.name)=(.*)/\1=$ADVERTISED_HOST/g" $KAFKA_HOME/config/server.properties
-fi
-if [ ! -z "$ADVERTISED_PORT" ]; then
-    echo "advertised port: $ADVERTISED_PORT"
-    sed -r -i "s/#(advertised.port)=(.*)/\1=$ADVERTISED_PORT/g" $KAFKA_HOME/config/server.properties
+if [[ -n "$KAFKA_HEAP_OPTS" ]]; then
+    sed -r -i "s/^(export KAFKA_HEAP_OPTS)=\"(.*)\"/\1=\"$KAFKA_HEAP_OPTS\"/g" $KAFKA_HOME/bin/kafka-server-start.sh
+    unset KAFKA_HEAP_OPTS
 fi
 
-# Allow specification of log retention policies
-if [ ! -z "$LOG_RETENTION_HOURS" ]; then
-    echo "log retention hours: $LOG_RETENTION_HOURS"
-    sed -r -i "s/(log.retention.hours)=(.*)/\1=$LOG_RETENTION_HOURS/g" $KAFKA_HOME/config/server.properties
-fi
-if [ ! -z "$LOG_RETENTION_BYTES" ]; then
-    echo "log retention bytes: $LOG_RETENTION_BYTES"
-    sed -r -i "s/#(log.retention.bytes)=(.*)/\1=$LOG_RETENTION_BYTES/g" $KAFKA_HOME/config/server.properties
+for VAR in `env`
+do
+  if [[ $VAR =~ ^KAFKA_ && ! $VAR =~ ^KAFKA_HOME ]]; then
+    kafka_name=`echo "$VAR" | sed -r "s/KAFKA_(.*)=.*/\1/g" | tr '[:upper:]' '[:lower:]' | tr _ .`
+    env_var=`echo "$VAR" | sed -r "s/(.*)=.*/\1/g"`
+    if egrep -q "(^|^#)$kafka_name=" $KAFKA_HOME/config/server.properties; then
+        sed -r -i "s@(^|^#)($kafka_name)=(.*)@\2=${!env_var}@g" $KAFKA_HOME/config/server.properties #note that no config values may contain an '@' char
+    else
+        echo "$kafka_name=${!env_var}" >> $KAFKA_HOME/config/server.properties
+    fi
+  fi
+done
+
+
+$KAFKA_HOME/bin/kafka-server-start.sh $KAFKA_HOME/config/server.properties &
+KAFKA_SERVER_PID=$!
+
+while netstat -lnt | awk '$4 ~ /:9092$/ {exit 1}'; do sleep 1; done
+
+if [[ -n $KAFKA_CREATE_TOPICS ]]; then
+    IFS=','; for topicToCreate in $KAFKA_CREATE_TOPICS; do
+        $KAFKA_HOME/bin/kafka-topics.sh --create --zookeeper $KAFKA_ZOOKEEPER_CONNECT --replication-factor 1 --partition 1 --topic "$topicToCreate"
+    done
 fi
 
-# Run Kafka
-$KAFKA_HOME/bin/kafka-server-start.sh $KAFKA_HOME/config/server.properties
+wait $KAFKA_SERVER_PID
