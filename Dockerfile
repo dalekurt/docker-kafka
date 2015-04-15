@@ -16,6 +16,13 @@ RUN apt-get update && \
     apt-get install -y wget supervisor dnsutils curl && \
     rm -rf /var/lib/apt/lists/*
 
+#
+RUN sh -c "wget -qO- https://get.docker.io/gpg | apt-key add -" && \
+    sh -c "echo deb http://get.docker.io/ubuntu docker main > /etc/apt/sources.list.d/docker.list" && \
+    apt-get update && \
+    apt-get install -y lxc-docker && \
+    rm -rf /var/lib/apt/lists/*
+
 # Downloading and install Kafka    
 ADD scripts/download-kafka.sh /tmp/download-kafka.sh
 RUN /tmp/download-kafka.sh
