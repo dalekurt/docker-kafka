@@ -1,4 +1,3 @@
-#FROM ubuntu:trusty
 FROM stackbrew/ubuntu:14.04
 
 MAINTAINER Dale-Kurt Murray "dalekurt.murray@gmail.com"
