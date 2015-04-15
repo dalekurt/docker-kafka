@@ -1,15 +1,9 @@
-# Kafka for Ubuntu 14.04
-#
-# GitHub - http://github.com/dalekurt/docker-kafka
-# Docker Hub - http://hub.docker.com/u/dalekurt/kafka
-# Twitter - http://www.twitter.com/dalekurt
-
+#FROM ubuntu:trusty
 FROM stackbrew/ubuntu:14.04
 
 MAINTAINER Dale-Kurt Murray "dalekurt.murray@gmail.com"
 
-ENV KAFKA_VERSION 0.8.2.1 
-ENV SCALA_VERSION 2.10
+ENV KAFKA_VERSION="0.8.2.1" SCALA_VERSION="2.10"
 
 RUN apt-get update && apt-get install -y unzip openjdk-6-jdk wget curl git docker.io jq
 
